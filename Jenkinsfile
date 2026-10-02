@@ -33,6 +33,7 @@ pipeline {
                     withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
                         bat 'copy "%ENV_FILE%" .env /Y'
                     }
+		    bat 'docker build -f ../Dockerfile -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
                     script {
                         dockerImage = docker.build("${WEBAPP_IMAGE}:${env.BUILD_NUMBER}")
                     }
