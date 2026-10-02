@@ -31,7 +31,7 @@ pipeline {
                 echo 'Stage 2: Building Web App Docker Image (staging env)'
                 dir('next_webapp') {
                     withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
-                        sh 'cp "$ENV_FILE" .env'
+                        bat 'copy "%ENV_FILE%" .env /Y'
                     }
                     script {
                         dockerImage = docker.build("${WEBAPP_IMAGE}:${env.BUILD_NUMBER}")
@@ -45,8 +45,8 @@ pipeline {
             steps {
                 echo 'Stage 3: Running Tests'
                 dir('next_webapp') {
-                    sh 'npm install --silent'
-                    sh 'npm test -- --passWithNoTests || true'
+		    bat 'npm install --silent'
+                    bat 'npm test -- --passWithNoTests || exit 0'
                 }
             }
         }
@@ -59,7 +59,7 @@ pipeline {
                     script {
                         def scannerHome = tool 'SonarScanner'
                         withSonarQubeEnv('MySonarQubeServer') {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.token=${SONAR_TOKEN}"
+                            bat "\"${scannerHome}\\bin\\sonar-scanner\" -Dsonar.token=%SONAR_TOKEN%"
                         }
                     }
                 }
@@ -73,14 +73,14 @@ pipeline {
                     steps {
                         echo 'Stage 5: NPM Audit'
                         dir('next_webapp') {
-                            sh 'npm audit --audit-level=high || true'
+                            bat 'npm audit --audit-level=high || exit 0'
                         }
                     }
                 }
                 stage('Container Vulnerability Scan') {
                     steps {
                         echo 'Stage 5: Trivy Container Scan'
-                        sh "trivy image --severity HIGH,CRITICAL ${WEBAPP_IMAGE}:${env.BUILD_NUMBER} || true"
+                        bat "trivy image --severity HIGH,CRITICAL ${WEBAPP_IMAGE}:${env.BUILD_NUMBER} || exit 0"
                     }
                 }
             }
@@ -96,8 +96,8 @@ pipeline {
                         dockerImage.push("staging")
                     }
                 }
-                sh "docker compose -f docker-compose.staging.yml up -d --force-recreate"
-                sh "sleep 8 && curl -sf http://localhost:3000 || exit 1"
+		bat "docker compose -f docker-compose.staging.yml up -d --force-recreate"
+                bat "timeout /t 8 /nobreak >nul && curl -sf http://localhost:3000 || exit 1"
             }
         }
 
@@ -113,14 +113,9 @@ pipeline {
                 echo 'Stage 7: Production Release'
                 input message: 'Staging verified above. Release this build to Production?', ok: 'Deploy to Prod'
 
-                // Rebuild with the PRODUCTION .env - NEXT_PUBLIC_APP_URL (and any other
-                // NEXT_PUBLIC_* values) are baked into the JS bundle at build time, so the
-                // staging image can't just be re-tagged and reused here; it has staging's
-                // URL compiled into it. This is a real rebuild, not a promotion of the same
-                // artifact, specifically because of that Next.js build-time inlining.
                 dir('next_webapp') {
                     withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
-                        sh 'cp "$ENV_FILE" .env'
+                        bat 'copy "%ENV_FILE%" .env /Y'
                     }
                     script {
                         dockerImageProd = docker.build("${WEBAPP_IMAGE}:prod-${env.BUILD_NUMBER}")
@@ -134,8 +129,8 @@ pipeline {
                     }
                 }
 
-                sh "docker compose -f docker-compose.prod.yml up -d --force-recreate"
-                sh "sleep 8 && curl -sf http://localhost:8080 || exit 1"
+		bat "docker compose -f docker-compose.prod.yml up -d --force-recreate"
+                bat "timeout /t 8 /nobreak >nul && curl -sf http://localhost:8080 || exit 1"
             }
         }
     }
@@ -143,7 +138,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning up unused Docker images from build agent'
-            sh "docker image prune -f || true"
+            bat "docker image prune -f || exit 0"
         }
         success {
             echo ' SUCCESS: Pipeline completed all 7 stages'
