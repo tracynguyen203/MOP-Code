@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  mop-webapp-staging:
-    image: tracynguyen203/mop-webapp:staging
-    container_name: mop-webapp-staging
+  mop-webapp-prod:
+    image: tracynguyen203/mop-webapp:latest
+    container_name: mop-webapp-prod
     restart: always
     ports:
-      - "3000:3000"
+      - "8080:3000"
     environment:
-      - NODE_ENV=staging
+      - NODE_ENV=production
       - PORT=3000
       - MONGODB_URI=${MONGODB_URI}
       - JWT_SECRET=${JWT_SECRET}
@@ -17,11 +17,7 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROM=${SMTP_FROM}
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
-      - GCS_IMAGES_BUCKET=${GCS_IMAGES_BUCKET}
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcs-key.json
-    volumes:
-      - ${GCS_KEY_PATH}:/secrets/gcs-key.json:ro
+      - NEXT_PUBLIC_APP_URL=http://localhost:8080
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
       interval: 10s
