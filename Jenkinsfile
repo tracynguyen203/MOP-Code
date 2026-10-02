@@ -29,12 +29,10 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'Stage 2: Building Web App Docker Image (staging env)'
-                dir('next_webapp') {
-                    withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
-                        bat 'copy "%ENV_FILE%" .env /Y'
-                    }
-                    bat 'docker build -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
+                withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
+                    bat 'copy "%ENV_FILE%" .env /Y'
                 }
+                bat 'docker build -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
             }
         }
 
@@ -42,10 +40,8 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Stage 3: Running Tests'
-                dir('next_webapp') {
-                    bat 'npm install --silent'
-                    bat 'npm test -- --passWithNoTests || exit 0'
-                }
+                bat 'npm install --silent'
+                bat 'npm test -- --passWithNoTests || exit 0'
             }
         }
 
@@ -70,9 +66,7 @@ pipeline {
                 stage('Dependency Audit') {
                     steps {
                         echo 'Stage 5: NPM Audit'
-                        dir('next_webapp') {
-                            bat 'npm audit --audit-level=high || exit 0'
-                        }
+                        bat 'npm audit --audit-level=high || exit 0'
                     }
                 }
                 stage('Container Vulnerability Scan') {
@@ -111,12 +105,10 @@ pipeline {
                 echo 'Stage 7: Production Release'
                 input message: 'Staging verified above. Release this build to Production?', ok: 'Deploy to Prod'
 
-                dir('next_webapp') {
-                    withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
-                        bat 'copy "%ENV_FILE%" .env /Y'
-                    }
-                    bat 'docker build -t %WEBAPP_IMAGE%:prod-%BUILD_NUMBER% -t %WEBAPP_IMAGE%:latest .'
+                withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
+                    bat 'copy "%ENV_FILE%" .env /Y'
                 }
+                bat 'docker build -t %WEBAPP_IMAGE%:prod-%BUILD_NUMBER% -t %WEBAPP_IMAGE%:latest .'
 
                 withCredentials([usernamePassword(credentialsId: DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     bat 'docker login -u %DOCKER_USER% -p %DOCKER_PASS%'
