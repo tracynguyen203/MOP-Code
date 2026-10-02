@@ -7,8 +7,6 @@ pipeline {
         WEBAPP_IMAGE        = "${DOCKERHUB_NAMESPACE}/mop-webapp"
         DOCKER_CREDS_ID     = 'dockerhub-creds'
         SONAR_TOKEN_ID      = 'sonarqube-token'
-        STAGING_HOST        = 'localhost'
-        PROD_HOST           = 'localhost'
     }
 
     options {
@@ -27,14 +25,16 @@ pipeline {
             }
         }
 
-        // Stage 2: Build Docker Image for the Next.js Web Application
+        // Stage 2: Build Docker Image for the Next.js Web Application (staging config)
         stage('Build') {
             steps {
-                echo 'Stage 2: Building Web App Docker Image'
+                echo 'Stage 2: Building Web App Docker Image (staging env)'
                 dir('next_webapp') {
+                    withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
+                        sh 'cp "$ENV_FILE" .env'
+                    }
                     script {
                         dockerImage = docker.build("${WEBAPP_IMAGE}:${env.BUILD_NUMBER}")
-                        dockerImageLatest = docker.build("${WEBAPP_IMAGE}:latest")
                     }
                 }
             }
@@ -46,7 +46,6 @@ pipeline {
                 echo 'Stage 3: Running Tests'
                 dir('next_webapp') {
                     sh 'npm install --silent'
-                    // Execute test script defined in package.json (gracefully handle empty test suites)
                     sh 'npm test -- --passWithNoTests || true'
                 }
             }
@@ -58,7 +57,6 @@ pipeline {
                 echo 'Stage 4: SonarQube Code Analysis'
                 withCredentials([string(credentialsId: SONAR_TOKEN_ID, variable: 'SONAR_TOKEN')]) {
                     script {
-                        // Retrieve the SonarScanner installation configured in Jenkins Global Tool Configuration
                         def scannerHome = tool 'SonarScanner'
                         withSonarQubeEnv('MySonarQubeServer') {
                             sh "${scannerHome}/bin/sonar-scanner -Dsonar.token=${SONAR_TOKEN}"
@@ -82,14 +80,13 @@ pipeline {
                 stage('Container Vulnerability Scan') {
                     steps {
                         echo 'Stage 5: Trivy Container Scan'
-                        // Scan Docker Image for HIGH and CRITICAL vulnerabilities using Trivy
                         sh "trivy image --severity HIGH,CRITICAL ${WEBAPP_IMAGE}:${env.BUILD_NUMBER} || true"
                     }
                 }
             }
         }
 
-        // Stage 6: Push Image to Docker Hub & Deploy to Staging Environment
+        // Stage 6: Push Staging Image to Docker Hub & Deploy to Staging Environment
         stage('Deploy to Staging') {
             steps {
                 echo 'Stage 6: Deploying to Staging Environment'
@@ -99,14 +96,13 @@ pipeline {
                         dockerImage.push("staging")
                     }
                 }
-                // Deploy containers using Staging Docker Compose file
                 sh "docker compose -f docker-compose.staging.yml up -d --force-recreate"
+                sh "sleep 8 && curl -sf http://localhost:3000 || exit 1"
             }
         }
 
-        // Stage 7: Manual Gate Approval & Production Deployment
+        // Stage 7: Manual Gate Approval, Rebuild with Prod Config, and Production Deployment
         stage('Release to Production') {
-            // Execute this stage only for builds on master or main branches
             when {
                 anyOf {
                     branch 'master'
@@ -115,17 +111,31 @@ pipeline {
             }
             steps {
                 echo 'Stage 7: Production Release'
-                // Require manual user intervention/approval via the Jenkins UI
-                input message: 'Are you sure you want to release this build to Production?', ok: 'Deploy to Prod'
-                
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDS_ID) {
-                        dockerImageLatest.push("latest")
-                        dockerImageLatest.push("prod-${env.BUILD_NUMBER}")
+                input message: 'Staging verified above. Release this build to Production?', ok: 'Deploy to Prod'
+
+                // Rebuild with the PRODUCTION .env - NEXT_PUBLIC_APP_URL (and any other
+                // NEXT_PUBLIC_* values) are baked into the JS bundle at build time, so the
+                // staging image can't just be re-tagged and reused here; it has staging's
+                // URL compiled into it. This is a real rebuild, not a promotion of the same
+                // artifact, specifically because of that Next.js build-time inlining.
+                dir('next_webapp') {
+                    withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
+                        sh 'cp "$ENV_FILE" .env'
+                    }
+                    script {
+                        dockerImageProd = docker.build("${WEBAPP_IMAGE}:prod-${env.BUILD_NUMBER}")
                     }
                 }
-                // Deploy containers using Production Docker Compose file
+
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDS_ID) {
+                        dockerImageProd.push("prod-${env.BUILD_NUMBER}")
+                        dockerImageProd.push("latest")
+                    }
+                }
+
                 sh "docker compose -f docker-compose.prod.yml up -d --force-recreate"
+                sh "sleep 8 && curl -sf http://localhost:8080 || exit 1"
             }
         }
     }
