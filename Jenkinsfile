@@ -14,7 +14,7 @@ pipeline {
     }
 
     stages {
-        // Stage 1: Source Code Checkout & Environment Initialization
+        // Stage 1: Checkout Code
         stage('Checkout & Setup') {
             steps {
                 echo 'Stage 1: Checkout Code'
@@ -25,14 +25,16 @@ pipeline {
             }
         }
 
-        // Stage 2: Build Docker Image for the Next.js Web Application (staging config)
+        // Stage 2: Build Docker Image
         stage('Build') {
             steps {
                 echo 'Stage 2: Building Web App Docker Image (staging env)'
-                withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
-                    bat 'copy "%ENV_FILE%" .env /Y'
+                dir('next_webapp') {
+                    withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
+                        bat 'copy "%ENV_FILE%" .env /Y'
+                    }
+                    bat 'docker build -f Dockerfile -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
                 }
-                bat 'docker build -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
             }
         }
 
@@ -40,12 +42,14 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Stage 3: Running Tests'
-                bat 'npm install --silent'
-                bat 'npm test -- --passWithNoTests || exit 0'
+                dir('next_webapp') {
+                    bat 'npm install --silent'
+                    bat 'npm test -- --passWithNoTests || exit 0'
+                }
             }
         }
 
-        // Stage 4: Code Quality Analysis with SonarQube
+        // Stage 4: Code Quality Analysis
         stage('Code Quality') {
             steps {
                 echo 'Stage 4: SonarQube Code Analysis'
@@ -66,7 +70,9 @@ pipeline {
                 stage('Dependency Audit') {
                     steps {
                         echo 'Stage 5: NPM Audit'
-                        bat 'npm audit --audit-level=high || exit 0'
+                        dir('next_webapp') {
+                            bat 'npm audit --audit-level=high || exit 0'
+                        }
                     }
                 }
                 stage('Container Vulnerability Scan') {
@@ -78,7 +84,7 @@ pipeline {
             }
         }
 
-        // Stage 6: Push Staging Image to Docker Hub & Deploy to Staging Environment
+        // Stage 6: Deploy to Staging
         stage('Deploy to Staging') {
             steps {
                 echo 'Stage 6: Deploying to Staging Environment'
@@ -93,7 +99,7 @@ pipeline {
             }
         }
 
-        // Stage 7: Manual Gate Approval, Rebuild with Prod Config, and Production Deployment
+        // Stage 7: Release to Production
         stage('Release to Production') {
             when {
                 anyOf {
@@ -105,10 +111,12 @@ pipeline {
                 echo 'Stage 7: Production Release'
                 input message: 'Staging verified above. Release this build to Production?', ok: 'Deploy to Prod'
 
-                withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
-                    bat 'copy "%ENV_FILE%" .env /Y'
+                dir('next_webapp') {
+                    withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
+                        bat 'copy "%ENV_FILE%" .env /Y'
+                    }
+                    bat 'docker build -f Dockerfile -t %WEBAPP_IMAGE%:prod-%BUILD_NUMBER% -t %WEBAPP_IMAGE%:latest .'
                 }
-                bat 'docker build -t %WEBAPP_IMAGE%:prod-%BUILD_NUMBER% -t %WEBAPP_IMAGE%:latest .'
 
                 withCredentials([usernamePassword(credentialsId: DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     bat 'docker login -u %DOCKER_USER% -p %DOCKER_PASS%'
