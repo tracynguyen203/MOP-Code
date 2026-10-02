@@ -33,7 +33,7 @@ pipeline {
                     withCredentials([file(credentialsId: 'app-env-staging', variable: 'ENV_FILE')]) {
                         bat 'copy "%ENV_FILE%" .env /Y'
                     }
-		    bat 'docker build -f ../Dockerfile -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
+		    bat 'docker build -t %WEBAPP_IMAGE%:%BUILD_NUMBER% .'
                     script {
                         dockerImage = docker.build("${WEBAPP_IMAGE}:${env.BUILD_NUMBER}")
                     }
@@ -103,7 +103,7 @@ pipeline {
         }
 
         // Stage 7: Manual Gate Approval, Rebuild with Prod Config, and Production Deployment
-        stage('Release to Production') {
+	stage('Release to Production') {
             when {
                 anyOf {
                     branch 'master'
@@ -118,20 +118,16 @@ pipeline {
                     withCredentials([file(credentialsId: 'app-env-prod', variable: 'ENV_FILE')]) {
                         bat 'copy "%ENV_FILE%" .env /Y'
                     }
-                    script {
-                        dockerImageProd = docker.build("${WEBAPP_IMAGE}:prod-${env.BUILD_NUMBER}")
-                    }
+                    bat 'docker build -t %WEBAPP_IMAGE%:prod-%BUILD_NUMBER% -t %WEBAPP_IMAGE%:latest .'
                 }
 
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDS_ID) {
-                        dockerImageProd.push("prod-${env.BUILD_NUMBER}")
-                        dockerImageProd.push("latest")
-                    }
+                withCredentials([usernamePassword(credentialsId: DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    bat 'docker login -u %DOCKER_USER% -p %DOCKER_PASS%'
+                    bat 'docker push %WEBAPP_IMAGE%:prod-%BUILD_NUMBER%'
+                    bat 'docker push %WEBAPP_IMAGE%:latest'
                 }
-
-		bat "docker compose -f docker-compose.prod.yml up -d --force-recreate"
-                bat "timeout /t 8 /nobreak >nul && curl -sf http://localhost:8080 || exit 1"
+                bat 'docker compose -f docker-compose.prod.yml up -d --force-recreate'
+                bat 'timeout /t 8 /nobreak >nul && curl -sf http://localhost:8080 || exit 1'
             }
         }
     }
